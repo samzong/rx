@@ -15,6 +15,8 @@ use crate::launch::EnvLookup;
 
 const GITHUB_REPO: &str = "samzong/rx";
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+const LAUNCH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+const HTTP_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) const HOMEBREW_UPDATE_HINT: &str = "rx is managed by Homebrew; run `brew upgrade rx`";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +53,7 @@ pub(crate) fn run(command: UpdateCommand) -> Result<()> {
 
 fn install(yes: bool) -> Result<()> {
     let current = crate::RELEASE_VERSION;
-    let release = fetch_latest_release()?;
+    let release = fetch_latest_release(HTTP_TIMEOUT)?;
     if !update_pending(current, &release) {
         println!("rx {current} is up to date (latest: {})", release.version);
         return Ok(());
@@ -86,7 +88,7 @@ pub(crate) fn maybe_before_launch(
         }
     }
     let current = crate::RELEASE_VERSION;
-    let release = match fetch_latest_release() {
+    let release = match fetch_latest_release(LAUNCH_CHECK_TIMEOUT) {
         Ok(release) => release,
         Err(error) => {
             eprintln!("[rx] update check failed: {error:#}");
@@ -172,10 +174,10 @@ fn relaunch(raw_args: &[std::ffi::OsString]) -> Result<()> {
     }
 }
 
-pub(crate) fn fetch_latest_release() -> Result<ReleaseInfo> {
+pub(crate) fn fetch_latest_release(timeout: Duration) -> Result<ReleaseInfo> {
     let asset_name = release_asset_name()?;
     let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
-    let body = http_get(&url, &[("Accept", "application/vnd.github+json")])?;
+    let body = http_get(&url, &[("Accept", "application/vnd.github+json")], timeout)?;
     let value: serde_json::Value = serde_json::from_str(&body).context("GitHub release JSON")?;
     let tag = value.get("tag_name").and_then(|v| v.as_str()).context("release missing tag_name")?;
     let version = tag.trim_start_matches('v').to_string();
@@ -193,7 +195,7 @@ pub(crate) fn fetch_latest_release() -> Result<ReleaseInfo> {
 fn install_release(release: &ReleaseInfo) -> Result<()> {
     let temp = tempfile::tempdir().context("create temp dir for update")?;
     let archive_path = temp.path().join(&release.asset_name);
-    let bytes = http_get_bytes(&release.download_url, &[])?;
+    let bytes = http_get_bytes(&release.download_url, &[], HTTP_TIMEOUT)?;
     fs::write(&archive_path, bytes).context("write release download")?;
     let extracted = extract_rx_binary(&archive_path, temp.path())?;
     replace_executable(&extracted)
@@ -313,14 +315,14 @@ fn homebrew_update_hint(path: &Path) -> Option<&'static str> {
         .then_some(HOMEBREW_UPDATE_HINT)
 }
 
-fn http_get(url: &str, headers: &[(&str, &str)]) -> Result<String> {
-    let bytes = http_get_bytes(url, headers)?;
+fn http_get(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Result<String> {
+    let bytes = http_get_bytes(url, headers, timeout)?;
     String::from_utf8(bytes).context("response is not UTF-8")
 }
 
-fn http_get_bytes(url: &str, headers: &[(&str, &str)]) -> Result<Vec<u8>> {
+fn http_get_bytes(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Result<Vec<u8>> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(60)))
+        .timeout_global(Some(timeout))
         .http_status_as_error(false)
         .build()
         .into();

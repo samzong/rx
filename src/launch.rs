@@ -390,10 +390,9 @@ pub(crate) fn exec(plan: &LaunchPlan) -> Result<()> {
 
     #[cfg(not(unix))]
     {
-        let status = cmd.status()?;
-        if !status.success() {
-            anyhow::bail!("{} exited with status {status}", plan.program.display());
-        }
-        Ok(())
+        use anyhow::Context;
+        let status =
+            cmd.status().with_context(|| format!("failed to start {}", plan.program.display()))?;
+        std::process::exit(status.code().unwrap_or(1))
     }
 }

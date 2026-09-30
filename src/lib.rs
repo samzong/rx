@@ -73,8 +73,6 @@ fn launch_request(
     env: &EnvLookup,
     raw_args: &[OsString],
 ) -> Result<()> {
-    // Updating is incidental to launching: a broken state file, an
-    // unwritable config dir, or a failed install must not stop the harness.
     if let Err(error) = update::maybe_before_launch(paths, env, raw_args) {
         eprintln!("[rx] update skipped: {error:#}");
     }
